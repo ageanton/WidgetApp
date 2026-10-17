@@ -1,0 +1,223 @@
+name: Build SoundPad Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate Gradle Configs, Widget Layouts & Metadata
+        run: |
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "SoundPad"
+          include(":app")
+          EOF
+
+          printf "org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8\nandroid.useAndroidX=true\nandroid.nonTransitiveRClass=true\n" > gradle.properties
+
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/xml
+
+          # Hardware-style App Launcher Icon
+          cat << 'EOF' > app/src/main/res/drawable/ic_launcher.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#0E0E11" android:pathData="M0,0h108v108h-108z"/>
+              <path android:fillColor="#1A1A1F" android:pathData="M24,24h60v60h-60z"/>
+              <path android:fillColor="#FF9F1C" android:pathData="M72,32a4,4 0 1,0 0.01,0z"/>
+              <path
+                  android:strokeColor="#FF9F1C"
+                  android:strokeWidth="4.5"
+                  android:strokeLineCap="round"
+                  android:pathData="M39,69 A21,21 0 1,1 69,69"/>
+          </vector>
+          EOF
+
+          # Shared 1x1 Canvas Tile Layout (Used by Volume 1x1, Cellular 1x1, and Wi-Fi 1x1)
+          cat << 'EOF' > app/src/main/res/layout/widget_single_canvas.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widget_single_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:padding="2dp">
+              <ImageView
+                  android:id="@+id/widget_single_img"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitCenter"
+                  android:contentDescription="Control Tile"/>
+          </FrameLayout>
+          EOF
+
+          # 3x1 Console Strip Layout (Full-bleed Canvas Image + 3 Independent Touch Zones)
+          cat << 'EOF' > app/src/main/res/layout/widget_console_canvas.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:padding="2dp">
+              <ImageView
+                  android:id="@+id/widget_console_img"
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:scaleType="fitCenter"
+                  android:contentDescription="Console Strip"/>
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="match_parent"
+                  android:orientation="horizontal"
+                  android:weightSum="3">
+                  <FrameLayout
+                      android:id="@+id/hit_zone_volume"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:background="@android:color/transparent"/>
+                  <FrameLayout
+                      android:id="@+id/hit_zone_cell"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:background="@android:color/transparent"/>
+                  <FrameLayout
+                      android:id="@+id/hit_zone_wifi"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:background="@android:color/transparent"/>
+              </LinearLayout>
+          </FrameLayout>
+          EOF
+
+          # Metadata 1: 1x1 Rotary Gauge Volume Tile
+          cat << 'EOF' > app/src/main/res/xml/widget_volume_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="60dp"
+              android:minHeight="60dp"
+              android:targetCellWidth="1"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_single_canvas"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"/>
+          EOF
+
+          # Metadata 2: 3x1 Console Strip (Volume + Cellular + Wi-Fi)
+          cat << 'EOF' > app/src/main/res/xml/widget_console_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="180dp"
+              android:minHeight="60dp"
+              android:targetCellWidth="3"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_console_canvas"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"/>
+          EOF
+
+          # Metadata 3: 1x1 Cellular Data Tile
+          cat << 'EOF' > app/src/main/res/xml/widget_data_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="60dp"
+              android:minHeight="60dp"
+              android:targetCellWidth="1"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_single_canvas"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"/>
+          EOF
+
+          # Metadata 4: 1x1 Wi-Fi Tile
+          cat << 'EOF' > app/src/main/res/xml/widget_wifi_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="60dp"
+              android:minHeight="60dp"
+              android:targetCellWidth="1"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_single_canvas"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"/>
+          EOF
+
+      - name: Ensure Valid Persistent Release Keystore
+        run: |
+          mkdir -p app
+          if ! keytool -list -keystore app/keystore.jks -storepass monolithPass2026 -alias monolith_key >/dev/null 2>&1; then
+            echo "Generating clean PKCS12 release keystore..."
+            rm -f app/keystore.jks
+            keytool -genkeypair -v \
+              -storetype PKCS12 \
+              -keystore app/keystore.jks \
+              -alias monolith_key \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass monolithPass2026 \
+              -keypass monolithPass2026 \
+              -dname "CN=SoundPad, OU=Mobile, O=SoundPadLocal, L=Local, S=Local, C=IN"
+            
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add app/keystore.jks
+            git commit -m "chore: persist valid PKCS12 release keystore [skip ci]" || true
+            git push || true
+          fi
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Signed Release APK
+        run: |
+          gradle assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk SoundPad-Release.apk
+
+      - name: Upload Ready-to-Install APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundPad-Android-Release
+          path: SoundPad-Release.apk
+          
