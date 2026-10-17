@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Normal permission to read live Wi-Fi & Cellular state for the widget LEDs -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
+        android:label="SoundPad"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 1. Rotary Volume Gauge (1x1) -->
+        <receiver
+            android:name=".VolumeWidgetProvider"
+            android:label="Attenuator (1×1)"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_volume_info" />
+        </receiver>
+
+        <!-- 2. Console Strip: Volume + Cellular + Wi-Fi (3x1) -->
+        <receiver
+            android:name=".ConsoleWidgetProvider"
+            android:label="Console Strip (3×1)"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
+                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_console_info" />
+        </receiver>
+
+        <!-- 3. Standalone Cellular Data Tile (1x1) -->
+        <receiver
+            android:name=".DataWidgetProvider"
+            android:label="Cellular (1×1)"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_data_info" />
+        </receiver>
+
+        <!-- 4. Standalone Wi-Fi Tile (1x1) -->
+        <receiver
+            android:name=".WifiWidgetProvider"
+            android:label="Wi-Fi (1×1)"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wifi_info" />
+        </receiver>
+
+    </application>
+</manifest>
+              
