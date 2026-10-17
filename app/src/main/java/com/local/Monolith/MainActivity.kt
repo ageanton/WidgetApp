@@ -6,66 +6,62 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
-import android.graphics.Color as AndroidColor
-import android.graphics.LinearGradient as AndroidLinearGradient
 import android.graphics.Paint as AndroidPaint
-import android.graphics.Path as AndroidPath
-import android.graphics.RadialGradient as AndroidRadialGradient
 import android.graphics.RectF as AndroidRectF
-import android.graphics.Shader as AndroidShader
-import android.graphics.Typeface as AndroidTypeface
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import android.view.View
 import android.widget.RemoteViews
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
-const val PREFS_NAME = "soundpad_hardware_prefs"
+const val PREFS_NAME = "soundpad_prefs_v2"
 const val KEY_TARGET_PERCENT = "target_percent"
-const val KEY_IS_ENGAGED = "is_engaged"
+const val KEY_DISPLAY_PERCENT = "display_percent"
 const val KEY_PREV_STREAM_VOL = "prev_stream_vol"
+const val KEY_IS_CLAMPED = "is_clamped"
 
 const val ACTION_TOGGLE_VOLUME = "com.local.monolith.ACTION_TOGGLE_VOLUME"
-const val ACTION_REFRESH_STATUS = "com.local.monolith.ACTION_REFRESH_STATUS"
 
 // ============================================================================
-// CORE AUDIO & CONNECTIVITY STATE ENGINE
+// CORE VOLUME, MOBILE DATA & BATTERY PROTECTION ACTIONS
 // ============================================================================
 
-fun toggleVolumeAttenuator(context: Context): Boolean {
+fun handleVolumeTileTap(context: Context): Int {
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -73,63 +69,50 @@ fun toggleVolumeAttenuator(context: Context): Boolean {
 
     val targetPercent = prefs.getInt(KEY_TARGET_PERCENT, 30)
     val targetIndex = ((targetPercent / 100f) * maxVol).roundToInt().coerceIn(0, maxVol)
-    val currentlyEngaged = prefs.getBoolean(KEY_IS_ENGAGED, false)
+    val isClamped = prefs.getBoolean(KEY_IS_CLAMPED, false)
 
-    val nextEngaged = if (!currentlyEngaged) {
-        // Save current volume before clamping so the second tap restores it
+    val newDisplayPercent = if (!isClamped || currentVol != targetIndex) {
         prefs.edit()
             .putInt(KEY_PREV_STREAM_VOL, currentVol)
-            .putBoolean(KEY_IS_ENGAGED, true)
+            .putBoolean(KEY_IS_CLAMPED, true)
+            .putInt(KEY_DISPLAY_PERCENT, targetPercent)
             .apply()
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetIndex, 0)
-        true
+        targetPercent
     } else {
-        // Disengage and restore previous volume
-        val defaultRestore = (maxVol * 0.75f).roundToInt().coerceIn(1, maxVol)
-        val restoreVol = prefs.getInt(KEY_PREV_STREAM_VOL, defaultRestore).coerceIn(0, maxVol)
-        prefs.edit().putBoolean(KEY_IS_ENGAGED, false).apply()
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restoreVol, 0)
-        false
+        val fallbackVol = (maxVol * 0.75f).roundToInt().coerceIn(1, maxVol)
+        val restoreIndex = prefs.getInt(KEY_PREV_STREAM_VOL, fallbackVol).coerceIn(0, maxVol)
+        val restoredPercent = ((restoreIndex.toFloat() / maxVol.toFloat()) * 100f).roundToInt().coerceIn(0, 100)
+        prefs.edit()
+            .putBoolean(KEY_IS_CLAMPED, false)
+            .putInt(KEY_DISPLAY_PERCENT, restoredPercent)
+            .apply()
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restoreIndex, 0)
+        restoredPercent
     }
 
-    updateAllHardwareWidgets(context)
-    return nextEngaged
+    updateAllWidgets(context)
+    return newDisplayPercent
 }
 
-fun applyTargetVolumeIfEngaged(context: Context, percent: Int) {
+fun setPreferredVolumeFromApp(context: Context, percent: Int) {
+    val clamped = percent.coerceIn(0, 100)
     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    if (prefs.getBoolean(KEY_IS_ENGAGED, false)) {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        val targetIndex = ((percent / 100f) * maxVol).roundToInt().coerceIn(0, maxVol)
-        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetIndex, 0)
-    }
-    updateAllHardwareWidgets(context)
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+    val targetIndex = ((clamped / 100f) * maxVol).roundToInt().coerceIn(0, maxVol)
+
+    prefs.edit()
+        .putInt(KEY_TARGET_PERCENT, clamped)
+        .putInt(KEY_DISPLAY_PERCENT, clamped)
+        .putBoolean(KEY_IS_CLAMPED, true)
+        .apply()
+
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetIndex, 0)
+    updateAllWidgets(context)
 }
 
-fun isWifiConnected(context: Context): Boolean {
-    return try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-    } catch (_: Exception) {
-        false
-    }
-}
-
-fun isCellularConnected(context: Context): Boolean {
-    return try {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val net = cm.activeNetwork ?: return false
-        val caps = cm.getNetworkCapabilities(net) ?: return false
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-    } catch (_: Exception) {
-        false
-    }
-}
-
-fun buildInternetPanelPendingIntent(context: Context, requestCode: Int): PendingIntent {
+fun buildMobileDataPendingIntent(context: Context, requestCode: Int): PendingIntent {
     val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -147,16 +130,44 @@ fun buildInternetPanelPendingIntent(context: Context, requestCode: Int): Pending
     )
 }
 
-fun buildWifiPanelPendingIntent(context: Context, requestCode: Int): PendingIntent {
-    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        Intent(Settings.Panel.ACTION_WIFI).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+fun resolveBatteryProtectionIntent(context: Context): Intent {
+    val pm = context.packageManager
+
+    val candidates = listOf(
+        // Samsung One UI direct Battery Protection activity paths
+        Intent().apply {
+            component = ComponentName(
+                "com.samsung.android.lool",
+                "com.samsung.android.sm.battery.ui.mode.BatteryProtectionActivity"
+            )
+        },
+        Intent().apply {
+            component = ComponentName(
+                "com.samsung.android.sm_cn",
+                "com.samsung.android.sm.battery.ui.mode.BatteryProtectionActivity"
+            )
+        },
+        Intent("com.samsung.android.sm.ACTION_BATTERY_PROTECTION"),
+        // Stock Android / Pixel / OEM Battery menu deep-linked to battery_protection
+        Intent(Intent.ACTION_POWER_USAGE_SUMMARY).apply {
+            putExtra(":settings:fragment_args_key", "battery_protection")
         }
-    } else {
-        Intent(Settings.ACTION_WIFI_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+
+    for (candidate in candidates) {
+        candidate.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (pm.resolveActivity(candidate, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            return candidate
         }
     }
+
+    return Intent(Settings.ACTION_SETTINGS).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+}
+
+fun buildBatteryProtectionPendingIntent(context: Context, requestCode: Int): PendingIntent {
+    val intent = resolveBatteryProtectionIntent(context)
     return PendingIntent.getActivity(
         context,
         requestCode,
@@ -165,406 +176,138 @@ fun buildWifiPanelPendingIntent(context: Context, requestCode: Int): PendingInte
     )
 }
 
-fun updateAllHardwareWidgets(context: Context) {
+// ============================================================================
+// 3X HIGH-RESOLUTION VOLUME RING RENDERER & TYPOGRAPHY HELPERS
+// ============================================================================
+
+fun getVolumeIconRes(percent: Int): Int {
+    return when {
+        percent <= 0 -> R.drawable.ic_volume_off
+        percent < 50 -> R.drawable.ic_volume_down
+        else -> R.drawable.ic_volume_up
+    }
+}
+
+fun formatPercentageText(percent: Int): CharSequence {
+    val text = "${percent.coerceIn(0, 100)}%"
+    val spannable = SpannableString(text)
+    // Number is 12sp on the TextView; "%" sign is scaled to 9sp
+    spannable.setSpan(
+        AbsoluteSizeSpan(9, true),
+        text.length - 1,
+        text.length,
+        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    )
+    return spannable
+}
+
+object VolumeRingRenderer {
+    /**
+     * Draws the circular volume ring at 3x the displayed tile size with anti-aliasing
+     * and a transparent background so edges stay razor-sharp.
+     * - Starts at 12 o'clock (-90 deg) and runs clockwise.
+     * - Ring diameter is 75% of the tile height, centered.
+     * - Stroke is 3.5dp with rounded caps.
+     */
+    fun renderRingBitmap3x(context: Context, percent: Int): Bitmap {
+        val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
+        val referenceTileDp = 84f
+        val scaleFactor = 3f
+
+        val sizePx = (referenceTileDp * density * scaleFactor).roundToInt().coerceAtLeast(360)
+        val strokeWidthPx = 3.5f * density * scaleFactor
+
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = AndroidCanvas(bmp)
+
+        val trackColor = context.resources.getColor(R.color.widget_ring_track, context.theme)
+        val progressColor = context.resources.getColor(R.color.widget_ring_progress, context.theme)
+
+        val ringDiameter = sizePx * 0.75f
+        val radius = ringDiameter / 2f
+        val cx = sizePx / 2f
+        val cy = sizePx / 2f
+
+        val trackPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+            style = AndroidPaint.Style.STROKE
+            strokeWidth = strokeWidthPx
+            strokeCap = AndroidPaint.Cap.ROUND
+            color = trackColor
+        }
+        canvas.drawCircle(cx, cy, radius, trackPaint)
+
+        val clamped = percent.coerceIn(0, 100)
+        if (clamped > 0) {
+            val progressPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
+                style = AndroidPaint.Style.STROKE
+                strokeWidth = strokeWidthPx
+                strokeCap = AndroidPaint.Cap.ROUND
+                color = progressColor
+            }
+            val oval = AndroidRectF(cx - radius, cy - radius, cx + radius, cy + radius)
+            val sweepAngle = (clamped / 100f) * 360f
+            canvas.drawArc(oval, -90f, sweepAngle, false, progressPaint)
+        }
+
+        return bmp
+    }
+}
+
+fun updateAllWidgets(context: Context) {
     val mgr = AppWidgetManager.getInstance(context)
+
+    val wideIds = mgr.getAppWidgetIds(ComponentName(context, ConsoleWidgetProvider::class.java))
+    if (wideIds.isNotEmpty()) ConsoleWidgetProvider().onUpdate(context, mgr, wideIds)
 
     val volIds = mgr.getAppWidgetIds(ComponentName(context, VolumeWidgetProvider::class.java))
     if (volIds.isNotEmpty()) VolumeWidgetProvider().onUpdate(context, mgr, volIds)
 
-    val consoleIds = mgr.getAppWidgetIds(ComponentName(context, ConsoleWidgetProvider::class.java))
-    if (consoleIds.isNotEmpty()) ConsoleWidgetProvider().onUpdate(context, mgr, consoleIds)
-
     val dataIds = mgr.getAppWidgetIds(ComponentName(context, DataWidgetProvider::class.java))
     if (dataIds.isNotEmpty()) DataWidgetProvider().onUpdate(context, mgr, dataIds)
 
-    val wifiIds = mgr.getAppWidgetIds(ComponentName(context, WifiWidgetProvider::class.java))
-    if (wifiIds.isNotEmpty()) WifiWidgetProvider().onUpdate(context, mgr, wifiIds)
+    val battIds = mgr.getAppWidgetIds(ComponentName(context, BatteryWidgetProvider::class.java))
+    if (battIds.isNotEmpty()) BatteryWidgetProvider().onUpdate(context, mgr, battIds)
 }
 
 // ============================================================================
-// HIGH-RESOLUTION HARDWARE BITMAP RENDERER (ANODIZED CHASSIS + GAUGE + LEDS)
+// WIDGET PROVIDERS (3x1 WIDE + 1x1 SMALL VARIANTS)
 // ============================================================================
-
-object HardwareBitmapRenderer {
-
-    private const val COLOR_CHASSIS_TOP = 0xFF1A1B1F.toInt()
-    private const val COLOR_CHASSIS_BOT = 0xFF111215.toInt()
-    private const val COLOR_WELL_TOP = 0xFF090A0C.toInt()
-    private const val COLOR_WELL_BOT = 0xFF0E0F12.toInt()
-    private const val COLOR_AMBER = 0xFFFF9F1C.toInt()
-    private const val COLOR_BONE = 0xFFF4F4F6.toInt()
-    private const val COLOR_DIM_TEXT = 0xFF686970.toInt()
-    private const val COLOR_DORMANT_TICK = 0xFF232429.toInt()
-    private const val COLOR_INACTIVE_ACTIVE_TICK = 0xFF494B54.toInt()
-    private const val COLOR_LED_OFF = 0xFF26272B.toInt()
-
-    fun renderVolumeTile1x1(percent: Int, isEngaged: Boolean): Bitmap {
-        val size = 440
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = AndroidCanvas(bmp)
-
-        drawAnodizedChassis(canvas, size.toFloat(), size.toFloat(), 96f)
-        drawRecessedWell(canvas, AndroidRectF(24f, 24f, size - 24f, size - 24f), 76f)
-
-        // Top-right physical status LED
-        drawStatusLed(canvas, cx = size - 68f, cy = 68f, isLit = isEngaged)
-
-        // 270-degree segmented rotary gauge + bold tabular percentage (no text labels)
-        drawSegmentedRotaryGauge(
-            canvas = canvas,
-            cx = size / 2f,
-            cy = size / 2f + 6f,
-            radius = 128f,
-            percent = percent,
-            isEngaged = isEngaged,
-            textSizePx = 76f
-        )
-
-        return bmp
-    }
-
-    fun renderSingleIconTile1x1(isCellular: Boolean, isLit: Boolean): Bitmap {
-        val size = 440
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = AndroidCanvas(bmp)
-
-        drawAnodizedChassis(canvas, size.toFloat(), size.toFloat(), 96f)
-        drawRecessedWell(canvas, AndroidRectF(24f, 24f, size - 24f, size - 24f), 76f)
-        drawStatusLed(canvas, cx = size - 68f, cy = 68f, isLit = isLit)
-
-        if (isCellular) {
-            drawCellularBarsGlyph(canvas, cx = size / 2f, cy = size / 2f + 6f, scale = 1.35f, isLit = isLit)
-        } else {
-            drawWifiArcsGlyph(canvas, cx = size / 2f, cy = size / 2f + 10f, scale = 1.35f, isLit = isLit)
-        }
-
-        return bmp
-    }
-
-    fun renderConsoleStrip3x1(
-        percent: Int,
-        isVolEngaged: Boolean,
-        isCellActive: Boolean,
-        isWifiActive: Boolean
-    ): Bitmap {
-        val width = 960
-        val height = 320
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = AndroidCanvas(bmp)
-
-        drawAnodizedChassis(canvas, width.toFloat(), height.toFloat(), 76f)
-
-        val padOuter = 20f
-        val gap = 14f
-        val totalWellsWidth = width - (padOuter * 2f) - (gap * 2f)
-        val wellWidth = totalWellsWidth / 3f
-        val wellTop = 20f
-        val wellBot = height - 20f
-
-        for (i in 0..2) {
-            val left = padOuter + i * (wellWidth + gap)
-            val right = left + wellWidth
-            val rect = AndroidRectF(left, wellTop, right, wellBot)
-            drawRecessedWell(canvas, rect, 58f)
-
-            val cx = rect.centerX()
-            val cy = rect.centerY()
-            val ledX = rect.right - 38f
-            val ledY = rect.top + 38f
-
-            when (i) {
-                0 -> {
-                    drawStatusLed(canvas, ledX, ledY, isVolEngaged)
-                    drawSegmentedRotaryGauge(
-                        canvas = canvas,
-                        cx = cx,
-                        cy = cy + 4f,
-                        radius = 86f,
-                        percent = percent,
-                        isEngaged = isVolEngaged,
-                        textSizePx = 50f
-                    )
-                }
-                1 -> {
-                    drawStatusLed(canvas, ledX, ledY, isCellActive)
-                    drawCellularBarsGlyph(canvas, cx = cx, cy = cy + 4f, scale = 1.0f, isLit = isCellActive)
-                }
-                2 -> {
-                    drawStatusLed(canvas, ledX, ledY, isWifiActive)
-                    drawWifiArcsGlyph(canvas, cx = cx, cy = cy + 8f, scale = 1.0f, isLit = isWifiActive)
-                }
-            }
-        }
-
-        return bmp
-    }
-
-    private fun drawAnodizedChassis(canvas: AndroidCanvas, w: Float, h: Float, cornerRadius: Float) {
-        val rect = AndroidRectF(2f, 2f, w - 2f, h - 2f)
-
-        // Anodized dark slate body
-        val bodyPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.FILL
-            shader = AndroidLinearGradient(
-                0f, 0f, 0f, h,
-                COLOR_CHASSIS_TOP, COLOR_CHASSIS_BOT,
-                AndroidShader.TileMode.CLAMP
-            )
-        }
-        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, bodyPaint)
-
-        // Top-edge specular catchlight border (22% white at top fading to 4% at bottom)
-        val borderPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.STROKE
-            strokeWidth = 3f
-            shader = AndroidLinearGradient(
-                0f, 0f, 0f, h,
-                AndroidColor.argb(58, 255, 255, 255),
-                AndroidColor.argb(10, 255, 255, 255),
-                AndroidShader.TileMode.CLAMP
-            )
-        }
-        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, borderPaint)
-    }
-
-    private fun drawRecessedWell(canvas: AndroidCanvas, rect: AndroidRectF, cornerRadius: Float) {
-        val wellPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.FILL
-            shader = AndroidLinearGradient(
-                0f, rect.top, 0f, rect.bottom,
-                COLOR_WELL_TOP, COLOR_WELL_BOT,
-                AndroidShader.TileMode.CLAMP
-            )
-        }
-        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, wellPaint)
-
-        // Subtle inner rim highlight at bottom of recessed well
-        val rimPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.STROKE
-            strokeWidth = 2f
-            shader = AndroidLinearGradient(
-                0f, rect.top, 0f, rect.bottom,
-                AndroidColor.argb(180, 0, 0, 0),
-                AndroidColor.argb(26, 255, 255, 255),
-                AndroidShader.TileMode.CLAMP
-            )
-        }
-        canvas.drawRoundRect(rect, cornerRadius, cornerRadius, rimPaint)
-    }
-
-    private fun drawStatusLed(canvas: AndroidCanvas, cx: Float, cy: Float, isLit: Boolean) {
-        if (isLit) {
-            // Soft radial amber glow
-            val glowPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-                style = AndroidPaint.Style.FILL
-                shader = AndroidRadialGradient(
-                    cx, cy, 22f,
-                    intArrayOf(
-                        AndroidColor.argb(120, 255, 159, 28),
-                        AndroidColor.argb(35, 255, 159, 28),
-                        AndroidColor.argb(0, 255, 159, 28)
-                    ),
-                    floatArrayOf(0f, 0.55f, 1f),
-                    AndroidShader.TileMode.CLAMP
-                )
-            }
-            canvas.drawCircle(cx, cy, 22f, glowPaint)
-
-            // Lit core dot
-            val corePaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-                style = AndroidPaint.Style.FILL
-                color = COLOR_AMBER
-            }
-            canvas.drawCircle(cx, cy, 6.5f, corePaint)
-
-            // Specular pinpoint inside LED
-            val highlightPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-                style = AndroidPaint.Style.FILL
-                color = AndroidColor.argb(200, 255, 238, 200)
-            }
-            canvas.drawCircle(cx - 1.5f, cy - 1.5f, 2f, highlightPaint)
-        } else {
-            // Dormant gunmetal socket
-            val offPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-                style = AndroidPaint.Style.FILL
-                color = COLOR_LED_OFF
-            }
-            canvas.drawCircle(cx, cy, 6f, offPaint)
-        }
-    }
-
-    private fun drawSegmentedRotaryGauge(
-        canvas: AndroidCanvas,
-        cx: Float,
-        cy: Float,
-        radius: Float,
-        percent: Int,
-        isEngaged: Boolean,
-        textSizePx: Float
-    ) {
-        val totalTicks = 28
-        val startAngleDeg = 135f
-        val sweepAngleDeg = 270f
-        val activeTicks = ((percent.coerceIn(0, 100) / 100f) * totalTicks).roundToInt()
-
-        val tickLength = radius * 0.16f
-        val innerRadius = radius - tickLength
-
-        val tickPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.STROKE
-            strokeWidth = (radius * 0.048f).coerceAtLeast(4f)
-            strokeCap = AndroidPaint.Cap.ROUND
-        }
-
-        for (i in 0 until totalTicks) {
-            val fraction = i.toFloat() / (totalTicks - 1).toFloat()
-            val angleDeg = startAngleDeg + fraction * sweepAngleDeg
-            val angleRad = Math.toRadians(angleDeg.toDouble())
-
-            val x1 = cx + (innerRadius * cos(angleRad)).toFloat()
-            val y1 = cy + (innerRadius * sin(angleRad)).toFloat()
-            val x2 = cx + (radius * cos(angleRad)).toFloat()
-            val y2 = cy + (radius * sin(angleRad)).toFloat()
-
-            tickPaint.color = when {
-                i < activeTicks && isEngaged -> COLOR_AMBER
-                i < activeTicks && !isEngaged -> COLOR_INACTIVE_ACTIVE_TICK
-                else -> COLOR_DORMANT_TICK
-            }
-            canvas.drawLine(x1, y1, x2, y2, tickPaint)
-        }
-
-        // Bold tabular percentage numeral only (zero label clutter)
-        val textPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            color = if (isEngaged) COLOR_BONE else COLOR_DIM_TEXT
-            textSize = textSizePx
-            textAlign = AndroidPaint.Align.CENTER
-            typeface = AndroidTypeface.create(AndroidTypeface.MONOSPACE, AndroidTypeface.BOLD)
-            letterSpacing = -0.04f
-        }
-
-        val fontMetrics = textPaint.fontMetrics
-        val textBaseline = cy - (fontMetrics.ascent + fontMetrics.descent) / 2f
-        canvas.drawText("$percent%", cx, textBaseline, textPaint)
-    }
-
-    private fun drawCellularBarsGlyph(canvas: AndroidCanvas, cx: Float, cy: Float, scale: Float, isLit: Boolean) {
-        val barWidth = 11f * scale
-        val gap = 8f * scale
-        val totalW = (4 * barWidth) + (3 * gap)
-        val startX = cx - totalW / 2f
-        val maxH = 66f * scale
-        val baseLineY = cy + maxH / 2f
-
-        val paint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.FILL
-            color = if (isLit) COLOR_BONE else COLOR_DIM_TEXT
-        }
-
-        val heights = floatArrayOf(0.32f, 0.54f, 0.77f, 1.0f)
-        for (i in 0..3) {
-            val h = maxH * heights[i]
-            val left = startX + i * (barWidth + gap)
-            val rect = AndroidRectF(left, baseLineY - h, left + barWidth, baseLineY)
-            canvas.drawRoundRect(rect, barWidth / 2f, barWidth / 2f, paint)
-        }
-    }
-
-    private fun drawWifiArcsGlyph(canvas: AndroidCanvas, cx: Float, cy: Float, scale: Float, isLit: Boolean) {
-        val color = if (isLit) COLOR_BONE else COLOR_DIM_TEXT
-        val dotY = cy + 24f * scale
-
-        val strokePaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.STROKE
-            strokeWidth = 9.5f * scale
-            strokeCap = AndroidPaint.Cap.ROUND
-            this.color = color
-        }
-
-        val radii = floatArrayOf(24f * scale, 44f * scale, 64f * scale)
-        for (r in radii) {
-            val oval = AndroidRectF(cx - r, dotY - r, cx + r, dotY + r)
-            canvas.drawArc(oval, 225f, 90f, false, strokePaint)
-        }
-
-        val dotPaint = AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
-            style = AndroidPaint.Style.FILL
-            this.color = color
-        }
-        canvas.drawCircle(cx, dotY, 6.5f * scale, dotPaint)
-    }
-}
-
-// ============================================================================
-// WIDGET PROVIDERS (1x1 ATTENUATOR, 3x1 CONSOLE STRIP, 1x1 CELL, 1x1 WI-FI)
-// ============================================================================
-
-class VolumeWidgetProvider : AppWidgetProvider() {
-    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val percent = prefs.getInt(KEY_TARGET_PERCENT, 30)
-        val isEngaged = prefs.getBoolean(KEY_IS_ENGAGED, false)
-        val bmp = HardwareBitmapRenderer.renderVolumeTile1x1(percent, isEngaged)
-
-        val toggleIntent = Intent(context, VolumeWidgetProvider::class.java).apply {
-            action = ACTION_TOGGLE_VOLUME
-        }
-        val pi = PendingIntent.getBroadcast(
-            context,
-            1001,
-            toggleIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_single_canvas)
-            views.setImageViewBitmap(R.id.widget_single_img, bmp)
-            views.setOnClickPendingIntent(R.id.widget_single_root, pi)
-            appWidgetManager.updateAppWidget(id, views)
-        }
-    }
-
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
-        if (intent.action == ACTION_TOGGLE_VOLUME) {
-            toggleVolumeAttenuator(context)
-        }
-    }
-}
 
 class ConsoleWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val percent = prefs.getInt(KEY_TARGET_PERCENT, 30)
-        val isVolEngaged = prefs.getBoolean(KEY_IS_ENGAGED, false)
-        val isCell = isCellularConnected(context)
-        val isWifi = isWifiConnected(context)
+        val targetPercent = prefs.getInt(KEY_TARGET_PERCENT, 30)
+        val displayPercent = prefs.getInt(KEY_DISPLAY_PERCENT, targetPercent)
 
-        val bmp = HardwareBitmapRenderer.renderConsoleStrip3x1(
-            percent = percent,
-            isVolEngaged = isVolEngaged,
-            isCellActive = isCell,
-            isWifiActive = isWifi
-        )
+        val ringBmp = VolumeRingRenderer.renderRingBitmap3x(context, displayPercent)
+        val iconRes = getVolumeIconRes(displayPercent)
+        val formattedPct = formatPercentageText(displayPercent)
 
-        val toggleVolIntent = Intent(context, ConsoleWidgetProvider::class.java).apply {
+        val volToggleIntent = Intent(context, ConsoleWidgetProvider::class.java).apply {
             action = ACTION_TOGGLE_VOLUME
         }
         val volPi = PendingIntent.getBroadcast(
             context,
-            2001,
-            toggleVolIntent,
+            101,
+            volToggleIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val cellPi = buildInternetPanelPendingIntent(context, 2002)
-        val wifiPi = buildWifiPanelPendingIntent(context, 2003)
+        val dataPi = buildMobileDataPendingIntent(context, 102)
+        val batteryPi = buildBatteryProtectionPendingIntent(context, 103)
 
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_console_canvas)
-            views.setImageViewBitmap(R.id.widget_console_img, bmp)
-            views.setOnClickPendingIntent(R.id.hit_zone_volume, volPi)
-            views.setOnClickPendingIntent(R.id.hit_zone_cell, cellPi)
-            views.setOnClickPendingIntent(R.id.hit_zone_wifi, wifiPi)
+            val views = RemoteViews(context.packageName, R.layout.widget_wide)
+            views.setImageViewBitmap(R.id.img_wide_ring, ringBmp)
+            views.setImageViewResource(R.id.img_wide_vol_icon, iconRes)
+            views.setTextViewText(R.id.txt_wide_vol_pct, formattedPct)
+            views.setContentDescription(R.id.tile_wide_volume, "Volume $displayPercent percent")
+            views.setContentDescription(R.id.tile_wide_data, "Mobile data")
+            views.setContentDescription(R.id.tile_wide_battery, "Battery protection")
+
+            views.setOnClickPendingIntent(R.id.tile_wide_volume, volPi)
+            views.setOnClickPendingIntent(R.id.tile_wide_data, dataPi)
+            views.setOnClickPendingIntent(R.id.tile_wide_battery, batteryPi)
+
             appWidgetManager.updateAppWidget(id, views)
         }
     }
@@ -572,51 +315,115 @@ class ConsoleWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
-            ACTION_TOGGLE_VOLUME -> toggleVolumeAttenuator(context)
-            ACTION_REFRESH_STATUS -> updateAllHardwareWidgets(context)
+            ACTION_TOGGLE_VOLUME -> handleVolumeTileTap(context)
+            Intent.ACTION_CONFIGURATION_CHANGED -> updateAllWidgets(context)
+        }
+    }
+}
+
+class VolumeWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val targetPercent = prefs.getInt(KEY_TARGET_PERCENT, 30)
+        val displayPercent = prefs.getInt(KEY_DISPLAY_PERCENT, targetPercent)
+
+        val ringBmp = VolumeRingRenderer.renderRingBitmap3x(context, displayPercent)
+        val iconRes = getVolumeIconRes(displayPercent)
+        val formattedPct = formatPercentageText(displayPercent)
+
+        val volToggleIntent = Intent(context, VolumeWidgetProvider::class.java).apply {
+            action = ACTION_TOGGLE_VOLUME
+        }
+        val volPi = PendingIntent.getBroadcast(
+            context,
+            201,
+            volToggleIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        for (id in appWidgetIds) {
+            val views = RemoteViews(context.packageName, R.layout.widget_small)
+            views.setViewVisibility(R.id.group_small_volume, View.VISIBLE)
+            views.setViewVisibility(R.id.img_small_center_icon, View.GONE)
+
+            views.setImageViewBitmap(R.id.img_small_ring, ringBmp)
+            views.setImageViewResource(R.id.img_small_vol_icon, iconRes)
+            views.setTextViewText(R.id.txt_small_vol_pct, formattedPct)
+            views.setContentDescription(R.id.tile_small_root, "Volume $displayPercent percent")
+            views.setOnClickPendingIntent(R.id.tile_small_root, volPi)
+
+            appWidgetManager.updateAppWidget(id, views)
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        when (intent.action) {
+            ACTION_TOGGLE_VOLUME -> handleVolumeTileTap(context)
+            Intent.ACTION_CONFIGURATION_CHANGED -> updateAllWidgets(context)
         }
     }
 }
 
 class DataWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val isCell = isCellularConnected(context)
-        val bmp = HardwareBitmapRenderer.renderSingleIconTile1x1(isCellular = true, isLit = isCell)
-        val cellPi = buildInternetPanelPendingIntent(context, 3001)
+        val dataPi = buildMobileDataPendingIntent(context, 301)
 
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_single_canvas)
-            views.setImageViewBitmap(R.id.widget_single_img, bmp)
-            views.setOnClickPendingIntent(R.id.widget_single_root, cellPi)
+            val views = RemoteViews(context.packageName, R.layout.widget_small)
+            views.setViewVisibility(R.id.group_small_volume, View.GONE)
+            views.setViewVisibility(R.id.img_small_center_icon, View.VISIBLE)
+
+            views.setImageViewResource(R.id.img_small_center_icon, R.drawable.ic_signal_cellular_alt)
+            views.setContentDescription(R.id.tile_small_root, "Mobile data")
+            views.setOnClickPendingIntent(R.id.tile_small_root, dataPi)
+
             appWidgetManager.updateAppWidget(id, views)
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) {
+            updateAllWidgets(context)
         }
     }
 }
 
-class WifiWidgetProvider : AppWidgetProvider() {
+class BatteryWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        val isWifi = isWifiConnected(context)
-        val bmp = HardwareBitmapRenderer.renderSingleIconTile1x1(isCellular = false, isLit = isWifi)
-        val wifiPi = buildWifiPanelPendingIntent(context, 4001)
+        val batteryPi = buildBatteryProtectionPendingIntent(context, 401)
 
         for (id in appWidgetIds) {
-            val views = RemoteViews(context.packageName, R.layout.widget_single_canvas)
-            views.setImageViewBitmap(R.id.widget_single_img, bmp)
-            views.setOnClickPendingIntent(R.id.widget_single_root, wifiPi)
+            val views = RemoteViews(context.packageName, R.layout.widget_small)
+            views.setViewVisibility(R.id.group_small_volume, View.GONE)
+            views.setViewVisibility(R.id.img_small_center_icon, View.VISIBLE)
+
+            views.setImageViewResource(R.id.img_small_center_icon, R.drawable.ic_shield)
+            views.setContentDescription(R.id.tile_small_root, "Battery protection")
+            views.setOnClickPendingIntent(R.id.tile_small_root, batteryPi)
+
             appWidgetManager.updateAppWidget(id, views)
+        }
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) {
+            updateAllWidgets(context)
         }
     }
 }
 
 // ============================================================================
-// MAIN ACTIVITY: HARDWARE CALIBRATION CONSOLE WITH LIVE 1:1 BITMAP PREVIEWS
+// MAIN ACTIVITY: COMPANION CALIBRATION SCREEN MATCHING THE WIDGET PALETTE
 // ============================================================================
 
 class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        updateAllHardwareWidgets(this)
+        updateAllWidgets(this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -625,265 +432,201 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
+            val isDark = isSystemInDarkTheme()
             val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
 
             var targetPercent by remember { mutableIntStateOf(prefs.getInt(KEY_TARGET_PERCENT, 30)) }
-            var isEngaged by remember { mutableStateOf(prefs.getBoolean(KEY_IS_ENGAGED, false)) }
-            var cellConnected by remember { mutableStateOf(isCellularConnected(context)) }
-            var wifiConnected by remember { mutableStateOf(isWifiConnected(context)) }
 
-            // Re-render exact widget bitmaps in real time as the user drags the attenuator
-            val previewConsoleBitmap = remember(targetPercent, isEngaged, cellConnected, wifiConnected) {
-                HardwareBitmapRenderer.renderConsoleStrip3x1(
-                    percent = targetPercent,
-                    isVolEngaged = isEngaged,
-                    isCellActive = cellConnected,
-                    isWifiActive = wifiConnected
-                ).asImageBitmap()
-            }
+            val pageBg = if (isDark) Color(0xFF1E1D1B) else Color(0xFFE6E3DD)
+            val containerBg = if (isDark) Color(0xFF2B2A28) else Color(0xFFF1EFEA)
+            val tileBg = if (isDark) Color(0xFF3A3936) else Color(0xFFE5E3DE)
+            val contentTint = if (isDark) Color(0xFFECEAE5) else Color(0xFF2E2D2B)
+            val trackTint = if (isDark) Color(0xFF4A4844) else Color(0xFFD6D3CC)
+            val progressTint = Color(0xFFD97757)
 
-            val previewSingleVolBitmap = remember(targetPercent, isEngaged) {
-                HardwareBitmapRenderer.renderVolumeTile1x1(targetPercent, isEngaged).asImageBitmap()
-            }
-
-            val previewSingleCellBitmap = remember(cellConnected) {
-                HardwareBitmapRenderer.renderSingleIconTile1x1(isCellular = true, isLit = cellConnected).asImageBitmap()
-            }
-
-            val previewSingleWifiBitmap = remember(wifiConnected) {
-                HardwareBitmapRenderer.renderSingleIconTile1x1(isCellular = false, isLit = wifiConnected).asImageBitmap()
-            }
-
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    background = Color(0xFF09090B),
-                    surface = Color(0xFF131417),
-                    primary = Color(0xFFFF9F1C),
-                    onBackground = Color(0xFFF4F4F6),
-                    onSurface = Color(0xFFF4F4F6)
-                )
-            ) {
+            MaterialTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = pageBg
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 22.dp, vertical = 44.dp),
+                            .padding(horizontal = 24.dp, vertical = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        // Header
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "SOUNDPAD // 01",
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                letterSpacing = 1.5.sp,
-                                color = Color(0xFFF4F4F6)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(if (isEngaged) Color(0x26FF9F1C) else Color(0xFF18191D))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isEngaged) Color(0xFFFF9F1C) else Color(0xFF282930),
-                                        shape = RoundedCornerShape(50)
-                                    )
-                                    .clickable {
-                                        isEngaged = toggleVolumeAttenuator(context)
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = if (isEngaged) "ENGAGED • $targetPercent%" else "STANDBY",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = if (isEngaged) Color(0xFFFF9F1C) else Color(0xFF787982)
-                                )
-                            }
-                        }
+                        Text(
+                            text = "SoundPad",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = contentTint
+                        )
 
-                        // Live Interactive 1:1 Widget Hardware Preview Surface
-                        Column(
+                        // Live 3x1 Widget Preview (Exact 1:1 styling)
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFF0E0F12))
-                                .border(1.dp, Color(0xFF22232A), RoundedCornerShape(24.dp))
-                                .padding(18.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                                .height(92.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(containerBg)
+                                .padding(8.dp)
                         ) {
-                            Text(
-                                text = "LIVE HARDWARE WIDGET PREVIEW (TAP TO TEST)",
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                letterSpacing = 1.2.sp,
-                                color = Color(0xFF70727A)
-                            )
-
-                            // 3x1 Console Strip Preview
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(3f)
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Image(
-                                    bitmap = previewConsoleBitmap,
-                                    contentDescription = "3x1 Console Strip Preview",
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Row(modifier = Modifier.fillMaxSize()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .clickable {
-                                                isEngaged = toggleVolumeAttenuator(context)
-                                            }
+                                // Tile 1: Volume
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            targetPercent = handleVolumeTileTap(context)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val diameter = size.minDimension * 0.75f
+                                        val strokePx = 3.5.dp.toPx()
+                                        val topLeft = Offset(
+                                            (size.width - diameter) / 2f,
+                                            (size.height - diameter) / 2f
+                                        )
+                                        drawArc(
+                                            color = trackTint,
+                                            startAngle = 0f,
+                                            sweepAngle = 360f,
+                                            useCenter = false,
+                                            topLeft = topLeft,
+                                            size = Size(diameter, diameter),
+                                            style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                                        )
+                                        if (targetPercent > 0) {
+                                            drawArc(
+                                                color = progressTint,
+                                                startAngle = -90f,
+                                                sweepAngle = (targetPercent / 100f) * 360f,
+                                                useCenter = false,
+                                                topLeft = topLeft,
+                                                size = Size(diameter, diameter),
+                                                style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                                            )
+                                        }
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(6.dp)
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = getVolumeIconRes(targetPercent)),
+                                            contentDescription = "Volume",
+                                            tint = contentTint,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = buildAnnotatedString {
+                                                append("$targetPercent")
+                                                withStyle(SpanStyle(fontSize = 9.sp)) {
+                                                    append("%")
+                                                }
+                                            },
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = contentTint
+                                        )
+                                    }
+                                }
+
+                                // Tile 2: Mobile Data
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            runCatching { buildMobileDataPendingIntent(context, 901).send() }
+                                        }
+                                        .padding(6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_signal_cellular_alt),
+                                        contentDescription = "Mobile data",
+                                        tint = contentTint,
+                                        modifier = Modifier.size(26.dp)
                                     )
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .clickable {
-                                                runCatching { buildInternetPanelPendingIntent(context, 901).send() }
-                                                cellConnected = isCellularConnected(context)
-                                            }
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .clickable {
-                                                runCatching { buildWifiPanelPendingIntent(context, 902).send() }
-                                                wifiConnected = isWifiConnected(context)
-                                            }
+                                }
+
+                                // Tile 3: Battery Protection
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            runCatching { context.startActivity(resolveBatteryProtectionIntent(context)) }
+                                        }
+                                        .padding(6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_shield),
+                                        contentDescription = "Battery protection",
+                                        tint = contentTint,
+                                        modifier = Modifier.size(26.dp)
                                     )
                                 }
                             }
-
-                            // Individual 1x1 Tiles Preview Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Image(
-                                    bitmap = previewSingleVolBitmap,
-                                    contentDescription = "1x1 Volume Tile",
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                        .clickable {
-                                            isEngaged = toggleVolumeAttenuator(context)
-                                        }
-                                )
-                                Image(
-                                    bitmap = previewSingleCellBitmap,
-                                    contentDescription = "1x1 Cellular Tile",
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                        .clickable {
-                                            runCatching { buildInternetPanelPendingIntent(context, 903).send() }
-                                            cellConnected = isCellularConnected(context)
-                                        }
-                                )
-                                Image(
-                                    bitmap = previewSingleWifiBitmap,
-                                    contentDescription = "1x1 Wi-Fi Tile",
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1f)
-                                        .clickable {
-                                            runCatching { buildWifiPanelPendingIntent(context, 904).send() }
-                                            wifiConnected = isWifiConnected(context)
-                                        }
-                                )
-                            }
                         }
 
-                        // Tactile Hardware Attenuator Slider Card
+                        // Volume Preset Slider Card
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFF131418))
-                                .border(1.dp, Color(0xFF25262E), RoundedCornerShape(24.dp))
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(containerBg)
                                 .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "ATTENUATOR LEVEL",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                    letterSpacing = 1.2.sp,
-                                    color = Color(0xFF8A8C96)
+                                    text = "Preferred Volume",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = contentTint
                                 )
                                 Text(
                                     text = "$targetPercent%",
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 32.sp,
-                                    color = Color(0xFFF4F4F6)
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = progressTint
                                 )
                             }
 
-                            // Custom Recessed Hardware Track Slider
-                            TactileHardwareSlider(
-                                percent = targetPercent,
-                                onPercentChange = { updated ->
-                                    targetPercent = updated
-                                    prefs.edit().putInt(KEY_TARGET_PERCENT, updated).apply()
-                                    applyTargetVolumeIfEngaged(context, updated)
-                                }
+                            Slider(
+                                value = targetPercent.toFloat(),
+                                onValueChange = {
+                                    val next = it.roundToInt().coerceIn(0, 100)
+                                    targetPercent = next
+                                    setPreferredVolumeFromApp(context, next)
+                                },
+                                valueRange = 0f..100f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = progressTint,
+                                    activeTrackColor = progressTint,
+                                    inactiveTrackColor = trackTint
+                                )
                             )
-
-                            // Fine-Tune Step Buttons (-5%, -1%, +1%, +5%)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(-5, -1, +1, +5).forEach { delta ->
-                                    val label = if (delta > 0) "+$delta%" else "$delta%"
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color(0xFF0B0C0E))
-                                            .border(1.dp, Color(0xFF23242B), RoundedCornerShape(12.dp))
-                                            .clickable {
-                                                val next = (targetPercent + delta).coerceIn(0, 100)
-                                                targetPercent = next
-                                                prefs.edit().putInt(KEY_TARGET_PERCENT, next).apply()
-                                                applyTargetVolumeIfEngaged(context, next)
-                                            }
-                                            .padding(vertical = 12.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = Color(0xFFD4D5DC)
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -892,56 +635,4 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun TactileHardwareSlider(
-    percent: Int,
-    onPercentChange: (Int) -> Unit
-) {
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(54.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF090A0C))
-            .border(1.dp, Color(0xFF22232A), RoundedCornerShape(14.dp))
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val next = ((offset.x / size.width) * 100f).roundToInt().coerceIn(0, 100)
-                    onPercentChange(next)
-                }
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures { change, _ ->
-                    change.consume()
-                    val next = ((change.position.x / size.width) * 100f).roundToInt().coerceIn(0, 100)
-                    onPercentChange(next)
-                }
-            }
-            .padding(horizontal = 10.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        val totalBars = 40
-        val activeBars = ((percent / 100f) * totalBars).roundToInt()
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            for (i in 0 until totalBars) {
-                val isLit = i < activeBars
-                val isMajor = i % 5 == 0
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(if (isMajor) 28.dp else 18.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(
-                            if (isLit) Color(0xFFFF9F1C)
-                            else Color(0xFF232429)
-                        )
-                )
-            }
-        }
-    }
-}
+ 
