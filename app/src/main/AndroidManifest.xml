@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Normal permission to read live Wi-Fi & Cellular state for the widget LEDs -->
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
@@ -21,63 +18,63 @@
             </intent-filter>
         </activity>
 
-        <!-- 1. Rotary Volume Gauge (1x1) -->
-        <receiver
-            android:name=".VolumeWidgetProvider"
-            android:label="Attenuator (1×1)"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_volume_info" />
-        </receiver>
-
-        <!-- 2. Console Strip: Volume + Cellular + Wi-Fi (3x1) -->
+        <!-- Wide 3x1 Widget: Volume, Mobile Data, Battery Protection -->
         <receiver
             android:name=".ConsoleWidgetProvider"
-            android:label="Console Strip (3×1)"
+            android:label="SoundPad (3×1)"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
                 <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
-                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/widget_console_info" />
+                android:resource="@xml/widget_wide_info" />
         </receiver>
 
-        <!-- 3. Standalone Cellular Data Tile (1x1) -->
+        <!-- Small 1x1 Widget: Volume -->
+        <receiver
+            android:name=".VolumeWidgetProvider"
+            android:label="Volume (1×1)"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
+                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_small_info" />
+        </receiver>
+
+        <!-- Small 1x1 Widget: Mobile Data -->
         <receiver
             android:name=".DataWidgetProvider"
-            android:label="Cellular (1×1)"
+            android:label="Mobile Data (1×1)"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/widget_data_info" />
+                android:resource="@xml/widget_small_info" />
         </receiver>
 
-        <!-- 4. Standalone Wi-Fi Tile (1x1) -->
+        <!-- Small 1x1 Widget: Battery Protection -->
         <receiver
-            android:name=".WifiWidgetProvider"
-            android:label="Wi-Fi (1×1)"
+            android:name=".BatteryWidgetProvider"
+            android:label="Battery Protection (1×1)"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.local.monolith.ACTION_REFRESH_STATUS" />
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/widget_wifi_info" />
+                android:resource="@xml/widget_small_info" />
         </receiver>
 
     </application>
 </manifest>
-              
