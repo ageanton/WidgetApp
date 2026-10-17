@@ -13,7 +13,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 3
-        versionName = "2.0.1"
+        versionName = "3.0.0"
     }
 
     signingConfigs {
@@ -27,9 +27,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt")
+            )
         }
         debug {
             signingConfig = signingConfigs.getByName("release")
