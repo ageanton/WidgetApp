@@ -60,6 +60,8 @@ jobs:
               <color name="widget_tile_bg">#E5E3DE</color>
               <color name="widget_tile_pressed">#DAD7D1</color>
               <color name="widget_content_tint">#2E2D2B</color>
+              <color name="widget_ring_track">#D6D3CC</color>
+              <color name="widget_ring_progress">#D97757</color>
           </resources>
           EOF
 
@@ -71,6 +73,8 @@ jobs:
               <color name="widget_tile_bg">#3A3936</color>
               <color name="widget_tile_pressed">#454340</color>
               <color name="widget_content_tint">#ECEAE5</color>
+              <color name="widget_ring_track">#4A4844</color>
+              <color name="widget_ring_progress">#D97757</color>
           </resources>
           EOF
 
@@ -80,12 +84,18 @@ jobs:
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
               android:height="108dp"
-              android:viewportWidth="24"
-              android:viewportHeight="24">
-              <path android:fillColor="#F1EFEA" android:pathData="M0,0h24v24h-24z"/>
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#F1EFEA" android:pathData="M0,0h108v108h-108z"/>
               <path
-                  android:fillColor="#2E2D2B"
-                  android:pathData="M5,10v4c0,0.55 0.45,1 1,1h2.5l2.79,2.79c0.63,0.63 1.71,0.18 1.71,-0.71V6.92c0,-0.89 -1.08,-1.34 -1.71,-0.71L8.5,9H6C5.45,9 5,9.45 5,10zM16,12c0,-1.47 -0.85,-2.74 -2.08,-3.35v6.7C15.15,14.74 16,13.47 16,12zM13.92,5.71v0.17c0,0.32 0.21,0.59 0.5,0.71C16.57,7.45 18.08,9.55 18.08,12s-1.51,4.55 -3.66,5.41c-0.29,0.12 -0.5,0.39 -0.5,0.71v0.17c0,0.52 0.52,0.89 1.01,0.71C17.75,17.92 19.75,15.2 19.75,12s-2,-5.92 -4.82,-7C14.44,4.82 13.92,5.19 13.92,5.71z"/>
+                  android:strokeColor="#D6D3CC"
+                  android:strokeWidth="7"
+                  android:pathData="M54,30 A24,24 0 1,1 53.9,30"/>
+              <path
+                  android:strokeColor="#D97757"
+                  android:strokeWidth="7"
+                  android:strokeLineCap="round"
+                  android:pathData="M54,30 A24,24 0 1,1 33.2,66"/>
           </vector>
           EOF
 
@@ -179,7 +189,21 @@ jobs:
           </vector>
           EOF
 
-          # 1x1 Small Widget Layout (Volume Tile Only)
+          # Material Symbols Rounded (FILL 1, Weight 500): brightness_6 / display
+          cat << 'EOF' > app/src/main/res/drawable/ic_display.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+              <path
+                  android:fillColor="@color/widget_content_tint"
+                  android:pathData="M20,8.69V6c0,-1.1 -0.9,-2 -2,-2h-2.69l-1.9,-1.9c-0.78,-0.78 -2.05,-0.78 -2.83,0L8.69,4H6c-1.1,0 -2,0.9 -2,2v2.69l-1.9,1.9c-0.78,0.78 -0.78,2.05 0,2.83l1.9,1.9V18c0,1.1 0.9,2 2,2h2.69l1.9,1.9c0.78,0.78 2.05,0.78 2.83,0l1.9,-1.9H18c1.1,0 2,-0.9 2,-2v-2.69l1.9,-1.9c0.78,-0.78 0.78,-2.05 0,-2.83L20,8.69zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5v10z" />
+          </vector>
+          EOF
+
+          # 1x1 Small Widget Layout (Used by all 5 standalone 1x1 widgets)
           cat << 'EOF' > app/src/main/res/layout/widget_small.xml
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -189,14 +213,15 @@ jobs:
               android:padding="8dp">
 
               <FrameLayout
-                  android:id="@+id/tile_small_volume"
+                  android:id="@+id/tile_small_root"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
                   android:background="@drawable/bg_tile"
                   android:padding="6dp"
-                  android:contentDescription="Set volume to preset">
+                  android:contentDescription="Control tile">
 
                   <ImageView
+                      android:id="@+id/img_small_center_icon"
                       android:layout_width="26dp"
                       android:layout_height="26dp"
                       android:layout_gravity="center"
@@ -207,8 +232,8 @@ jobs:
           </FrameLayout>
           EOF
 
-          # 2x2 Large Widget Layout (Top: Volume, Mobile Signal | Bottom: Battery Protection, Internet)
-          cat << 'EOF' > app/src/main/res/layout/widget_large.xml
+          # 2x3 Grid Widget Layout (5 Tiles: Row 1 = Volume + Data, Row 2 = Battery + Internet, Row 3 = Display)
+          cat << 'EOF' > app/src/main/res/layout/widget_grid_2x3.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
@@ -218,24 +243,24 @@ jobs:
               android:padding="8dp"
               android:baselineAligned="false">
 
-              <!-- Top Row: Volume (left), Mobile Signal (right) -->
+              <!-- Row 1: Volume (left), Mobile Data (right) -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
                   android:layout_weight="1"
-                  android:layout_marginBottom="3dp"
+                  android:layout_marginBottom="6dp"
                   android:orientation="horizontal"
                   android:baselineAligned="false">
 
                   <FrameLayout
-                      android:id="@+id/tile_large_volume"
+                      android:id="@+id/tile_grid_volume"
                       android:layout_width="0dp"
                       android:layout_height="match_parent"
                       android:layout_weight="1"
                       android:layout_marginEnd="3dp"
                       android:background="@drawable/bg_tile"
                       android:padding="6dp"
-                      android:contentDescription="Set volume to preset">
+                      android:contentDescription="Toggle preset volume">
 
                       <ImageView
                           android:layout_width="26dp"
@@ -247,7 +272,7 @@ jobs:
                   </FrameLayout>
 
                   <FrameLayout
-                      android:id="@+id/tile_large_data"
+                      android:id="@+id/tile_grid_data"
                       android:layout_width="0dp"
                       android:layout_height="match_parent"
                       android:layout_weight="1"
@@ -266,17 +291,17 @@ jobs:
                   </FrameLayout>
               </LinearLayout>
 
-              <!-- Bottom Row: Battery Protection (left), Internet (right) -->
+              <!-- Row 2: Battery Protection (left), Internet (right) -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
                   android:layout_weight="1"
-                  android:layout_marginTop="3dp"
+                  android:layout_marginBottom="6dp"
                   android:orientation="horizontal"
                   android:baselineAligned="false">
 
                   <FrameLayout
-                      android:id="@+id/tile_large_battery"
+                      android:id="@+id/tile_grid_battery"
                       android:layout_width="0dp"
                       android:layout_height="match_parent"
                       android:layout_weight="1"
@@ -295,7 +320,7 @@ jobs:
                   </FrameLayout>
 
                   <FrameLayout
-                      android:id="@+id/tile_large_internet"
+                      android:id="@+id/tile_grid_internet"
                       android:layout_width="0dp"
                       android:layout_height="match_parent"
                       android:layout_weight="1"
@@ -313,10 +338,29 @@ jobs:
                           android:importantForAccessibility="no" />
                   </FrameLayout>
               </LinearLayout>
+
+              <!-- Row 3: Display Settings (full-width bottom bar) -->
+              <FrameLayout
+                  android:id="@+id/tile_grid_display"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:background="@drawable/bg_tile"
+                  android:padding="6dp"
+                  android:contentDescription="Display settings">
+
+                  <ImageView
+                      android:layout_width="26dp"
+                      android:layout_height="26dp"
+                      android:layout_gravity="center"
+                      android:src="@drawable/ic_display"
+                      android:tint="@color/widget_content_tint"
+                      android:importantForAccessibility="no" />
+              </FrameLayout>
           </LinearLayout>
           EOF
 
-          # Provider XML 1: Small 1x1 Widget
+          # Provider XML 1: Small 1x1 Widget (Used by all 5 standalone 1x1 tiles)
           cat << 'EOF' > app/src/main/res/xml/widget_small_info.xml
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
@@ -326,25 +370,25 @@ jobs:
               android:maxResizeHeight="40dp"
               android:targetCellWidth="1"
               android:targetCellHeight="1"
-              android:updatePeriodMillis="0"
+              android:updatePeriodMillis="1800000"
               android:initialLayout="@layout/widget_small"
               android:resizeMode="none"
               android:widgetCategory="home_screen" />
           EOF
 
-          # Provider XML 2: Large 2x2 Widget
-          cat << 'EOF' > app/src/main/res/xml/widget_large_info.xml
+          # Provider XML 2: 2x3 Grid Widget (5-Tile Pad)
+          cat << 'EOF' > app/src/main/res/xml/widget_grid_info.xml
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
               android:minWidth="110dp"
-              android:minHeight="110dp"
+              android:minHeight="180dp"
               android:minResizeWidth="110dp"
-              android:minResizeHeight="110dp"
+              android:minResizeHeight="180dp"
               android:targetCellWidth="2"
-              android:targetCellHeight="2"
-              android:updatePeriodMillis="0"
-              android:initialLayout="@layout/widget_large"
-              android:resizeMode="none"
+              android:targetCellHeight="3"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_grid_2x3"
+              android:resizeMode="horizontal|vertical"
               android:widgetCategory="home_screen" />
           EOF
 
