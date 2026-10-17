@@ -12,8 +12,8 @@ android {
         applicationId = "com.local.soundpad"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "2.0.1"
     }
 
     signingConfigs {
@@ -27,12 +27,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = false
+            isShrinkResources = false
             signingConfig = signingConfigs.getByName("release")
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt")
-            )
         }
         debug {
             signingConfig = signingConfigs.getByName("release")
@@ -70,4 +67,3 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 }
-
