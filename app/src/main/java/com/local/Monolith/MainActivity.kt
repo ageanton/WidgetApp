@@ -491,4 +491,183 @@ class MainActivity : ComponentActivity() {
                             .padding(horizontal = 24.dp, vertical = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-             
+                        Text(
+                            text = "SoundPad",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = contentTint
+                        )
+
+                        // Live 3x1 Widget Preview (Exact 1:1 styling)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(92.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(containerBg)
+                                .padding(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Tile 1: Volume
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            targetPercent = handleVolumeTileTap(context)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val diameter = size.minDimension * 0.75f
+                                        val strokePx = 3.5.dp.toPx()
+                                        val topLeft = Offset(
+                                            (size.width - diameter) / 2f,
+                                            (size.height - diameter) / 2f
+                                        )
+                                        drawArc(
+                                            color = trackTint,
+                                            startAngle = 0f,
+                                            sweepAngle = 360f,
+                                            useCenter = false,
+                                            topLeft = topLeft,
+                                            size = Size(diameter, diameter),
+                                            style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                                        )
+                                        if (targetPercent > 0) {
+                                            drawArc(
+                                                color = progressTint,
+                                                startAngle = -90f,
+                                                sweepAngle = (targetPercent / 100f) * 360f,
+                                                useCenter = false,
+                                                topLeft = topLeft,
+                                                size = Size(diameter, diameter),
+                                                style = Stroke(width = strokePx, cap = StrokeCap.Round)
+                                            )
+                                        }
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(6.dp)
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = getVolumeIconRes(targetPercent)),
+                                            contentDescription = "Volume",
+                                            tint = contentTint,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = buildAnnotatedString {
+                                                append("$targetPercent")
+                                                withStyle(SpanStyle(fontSize = 9.sp)) {
+                                                    append("%")
+                                                }
+                                            },
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = contentTint
+                                        )
+                                    }
+                                }
+
+                                // Tile 2: Mobile Data
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            runCatching { buildMobileDataPendingIntent(context, 901).send() }
+                                        }
+                                        .padding(6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_signal_cellular_alt),
+                                        contentDescription = "Mobile data",
+                                        tint = contentTint,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+
+                                // Tile 3: Battery Protection
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(tileBg)
+                                        .clickable {
+                                            runCatching { context.startActivity(resolveBatteryProtectionIntent(context)) }
+                                        }
+                                        .padding(6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_shield),
+                                        contentDescription = "Battery protection",
+                                        tint = contentTint,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Volume Preset Slider Card
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(containerBg)
+                                .padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Preferred Volume",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = contentTint
+                                )
+                                Text(
+                                    text = "$targetPercent%",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = progressTint
+                                )
+                            }
+
+                            Slider(
+                                value = targetPercent.toFloat(),
+                                onValueChange = {
+                                    val next = it.roundToInt().coerceIn(0, 100)
+                                    targetPercent = next
+                                    setPreferredVolumeFromApp(context, next)
+                                },
+                                valueRange = 0f..100f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = progressTint,
+                                    activeTrackColor = progressTint,
+                                    inactiveTrackColor = trackTint
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
