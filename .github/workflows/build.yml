@@ -229,7 +229,7 @@ jobs:
                           android:layout_width="match_parent"
                           android:layout_height="match_parent"
                           android:scaleType="fitCenter"
-                          android:importantForAccessibility="no" />
+                          android:contentDescription="@null" />
 
                       <LinearLayout
                           android:layout_width="wrap_content"
@@ -244,8 +244,7 @@ jobs:
                               android:layout_width="18dp"
                               android:layout_height="18dp"
                               android:src="@drawable/ic_volume_down"
-                              android:tint="@color/widget_content_tint"
-                              android:importantForAccessibility="no" />
+                              android:contentDescription="@null" />
 
                           <TextView
                               android:id="@+id/txt_small_vol_pct"
@@ -264,9 +263,8 @@ jobs:
                       android:layout_width="26dp"
                       android:layout_height="26dp"
                       android:layout_gravity="center"
-                      android:tint="@color/widget_content_tint"
                       android:visibility="gone"
-                      android:importantForAccessibility="no" />
+                      android:contentDescription="@null" />
               </FrameLayout>
           </FrameLayout>
           EOF
@@ -296,7 +294,7 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="match_parent"
                       android:scaleType="fitCenter"
-                      android:importantForAccessibility="no" />
+                      android:contentDescription="@null" />
 
                   <LinearLayout
                       android:layout_width="wrap_content"
@@ -311,8 +309,7 @@ jobs:
                           android:layout_width="18dp"
                           android:layout_height="18dp"
                           android:src="@drawable/ic_volume_down"
-                          android:tint="@color/widget_content_tint"
-                          android:importantForAccessibility="no" />
+                          android:contentDescription="@null" />
 
                       <TextView
                           android:id="@+id/txt_wide_vol_pct"
@@ -343,8 +340,7 @@ jobs:
                       android:layout_height="26dp"
                       android:layout_gravity="center"
                       android:src="@drawable/ic_signal_cellular_alt"
-                      android:tint="@color/widget_content_tint"
-                      android:importantForAccessibility="no" />
+                      android:contentDescription="@null" />
               </FrameLayout>
 
               <!-- Tile 3: Battery Protection -->
@@ -362,8 +358,7 @@ jobs:
                       android:layout_height="26dp"
                       android:layout_gravity="center"
                       android:src="@drawable/ic_shield"
-                      android:tint="@color/widget_content_tint"
-                      android:importantForAccessibility="no" />
+                      android:contentDescription="@null" />
               </FrameLayout>
           </LinearLayout>
           EOF
@@ -434,7 +429,4 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk SoundPad-Release.apk
 
       - name: Upload Ready-to-Install APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: SoundPad-Android-Release
-          path: SoundPad-Release.apk
+        uses: act
