@@ -18,62 +18,32 @@
             </intent-filter>
         </activity>
 
-        <!-- Wide 3x1 Widget: Volume, Mobile Data, Battery Protection -->
-        <receiver
-            android:name=".ConsoleWidgetProvider"
-            android:label="SoundPad (3×1)"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
-                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_wide_info" />
-        </receiver>
-
-        <!-- Small 1x1 Widget: Volume -->
+        <!-- Small 1x1 Widget: Volume Tile Only -->
         <receiver
             android:name=".VolumeWidgetProvider"
             android:label="Volume (1×1)"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
-                <action android:name="com.local.monolith.ACTION_TOGGLE_VOLUME" />
+                <action android:name="com.local.monolith.ACTION_SET_PRESET_VOLUME" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_small_info" />
         </receiver>
 
-        <!-- Small 1x1 Widget: Mobile Data -->
+        <!-- Large 2x2 Widget: Volume, Mobile Signal, Battery Protection, Internet -->
         <receiver
-            android:name=".DataWidgetProvider"
-            android:label="Mobile Data (1×1)"
+            android:name=".GridWidgetProvider"
+            android:label="SoundPad (2×2)"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
+                <action android:name="com.local.monolith.ACTION_SET_PRESET_VOLUME" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
-                android:resource="@xml/widget_small_info" />
-        </receiver>
-
-        <!-- Small 1x1 Widget: Battery Protection -->
-        <receiver
-            android:name=".BatteryWidgetProvider"
-            android:label="Battery Protection (1×1)"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/widget_small_info" />
+                android:resource="@xml/widget_large_info" />
         </receiver>
 
     </application>
