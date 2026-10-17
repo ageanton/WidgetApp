@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint as AndroidPaint
@@ -17,7 +18,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
-import android.text.style.AbsoluteSizeSpan
+import android.text.style.RelativeSizeSpan
 import android.view.View
 import android.widget.RemoteViews
 import androidx.activity.ComponentActivity
@@ -134,7 +135,6 @@ fun resolveBatteryProtectionIntent(context: Context): Intent {
     val pm = context.packageManager
 
     val candidates = listOf(
-        // Samsung One UI direct Battery Protection activity paths
         Intent().apply {
             component = ComponentName(
                 "com.samsung.android.lool",
@@ -148,7 +148,6 @@ fun resolveBatteryProtectionIntent(context: Context): Intent {
             )
         },
         Intent("com.samsung.android.sm.ACTION_BATTERY_PROTECTION"),
-        // Stock Android / Pixel / OEM Battery menu deep-linked to battery_protection
         Intent(Intent.ACTION_POWER_USAGE_SUMMARY).apply {
             putExtra(":settings:fragment_args_key", "battery_protection")
         }
@@ -191,9 +190,9 @@ fun getVolumeIconRes(percent: Int): Int {
 fun formatPercentageText(percent: Int): CharSequence {
     val text = "${percent.coerceIn(0, 100)}%"
     val spannable = SpannableString(text)
-    // Number is 12sp on the TextView; "%" sign is scaled to 9sp
+    // Number is 12sp on the TextView; "%" sign is 9sp (0.75x of 12sp)
     spannable.setSpan(
-        AbsoluteSizeSpan(9, true),
+        RelativeSizeSpan(0.75f),
         text.length - 1,
         text.length,
         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -203,25 +202,22 @@ fun formatPercentageText(percent: Int): CharSequence {
 
 object VolumeRingRenderer {
     /**
-     * Draws the circular volume ring at 3x the displayed tile size with anti-aliasing
-     * and a transparent background so edges stay razor-sharp.
-     * - Starts at 12 o'clock (-90 deg) and runs clockwise.
-     * - Ring diameter is 75% of the tile height, centered.
-     * - Stroke is 3.5dp with rounded caps.
+     * Renders the circular ring at 3x resolution (288x288 px) with anti-aliasing
+     * and a transparent background so edges stay crisp while staying well below
+     * Android's 1MB RemoteViews Binder transaction limit.
      */
     fun renderRingBitmap3x(context: Context, percent: Int): Bitmap {
-        val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
-        val referenceTileDp = 84f
-        val scaleFactor = 3f
-
-        val sizePx = (referenceTileDp * density * scaleFactor).roundToInt().coerceAtLeast(360)
-        val strokeWidthPx = 3.5f * density * scaleFactor
+        val sizePx = 288
+        val strokeWidthPx = sizePx * (3.5f / 68f)
 
         val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = AndroidCanvas(bmp)
 
-        val trackColor = context.resources.getColor(R.color.widget_ring_track, context.theme)
-        val progressColor = context.resources.getColor(R.color.widget_ring_progress, context.theme)
+        val nightMask = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        val isDark = nightMask == Configuration.UI_MODE_NIGHT_YES
+
+        val trackColor = if (isDark) 0xFF4A4844.toInt() else 0xFFD6D3CC.toInt()
+        val progressColor = 0xFFD97757.toInt()
 
         val ringDiameter = sizePx * 0.75f
         val radius = ringDiameter / 2f
@@ -312,6 +308,16 @@ class ConsoleWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        onUpdate(context, appWidgetManager, intArrayOf(appWidgetId))
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
@@ -356,6 +362,16 @@ class VolumeWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        onUpdate(context, appWidgetManager, intArrayOf(appWidgetId))
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
@@ -382,6 +398,16 @@ class DataWidgetProvider : AppWidgetProvider() {
         }
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        onUpdate(context, appWidgetManager, intArrayOf(appWidgetId))
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (intent.action == Intent.ACTION_CONFIGURATION_CHANGED) {
@@ -405,6 +431,16 @@ class BatteryWidgetProvider : AppWidgetProvider() {
 
             appWidgetManager.updateAppWidget(id, views)
         }
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        onUpdate(context, appWidgetManager, intArrayOf(appWidgetId))
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -455,184 +491,4 @@ class MainActivity : ComponentActivity() {
                             .padding(horizontal = 24.dp, vertical = 48.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        Text(
-                            text = "SoundPad",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = contentTint
-                        )
-
-                        // Live 3x1 Widget Preview (Exact 1:1 styling)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(92.dp)
-                                .clip(RoundedCornerShape(28.dp))
-                                .background(containerBg)
-                                .padding(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                // Tile 1: Volume
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(tileBg)
-                                        .clickable {
-                                            targetPercent = handleVolumeTileTap(context)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        val diameter = size.minDimension * 0.75f
-                                        val strokePx = 3.5.dp.toPx()
-                                        val topLeft = Offset(
-                                            (size.width - diameter) / 2f,
-                                            (size.height - diameter) / 2f
-                                        )
-                                        drawArc(
-                                            color = trackTint,
-                                            startAngle = 0f,
-                                            sweepAngle = 360f,
-                                            useCenter = false,
-                                            topLeft = topLeft,
-                                            size = Size(diameter, diameter),
-                                            style = Stroke(width = strokePx, cap = StrokeCap.Round)
-                                        )
-                                        if (targetPercent > 0) {
-                                            drawArc(
-                                                color = progressTint,
-                                                startAngle = -90f,
-                                                sweepAngle = (targetPercent / 100f) * 360f,
-                                                useCenter = false,
-                                                topLeft = topLeft,
-                                                size = Size(diameter, diameter),
-                                                style = Stroke(width = strokePx, cap = StrokeCap.Round)
-                                            )
-                                        }
-                                    }
-
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center,
-                                        modifier = Modifier.padding(6.dp)
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(id = getVolumeIconRes(targetPercent)),
-                                            contentDescription = "Volume",
-                                            tint = contentTint,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Text(
-                                            text = buildAnnotatedString {
-                                                append("$targetPercent")
-                                                withStyle(SpanStyle(fontSize = 9.sp)) {
-                                                    append("%")
-                                                }
-                                            },
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = contentTint
-                                        )
-                                    }
-                                }
-
-                                // Tile 2: Mobile Data
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(tileBg)
-                                        .clickable {
-                                            runCatching { buildMobileDataPendingIntent(context, 901).send() }
-                                        }
-                                        .padding(6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_signal_cellular_alt),
-                                        contentDescription = "Mobile data",
-                                        tint = contentTint,
-                                        modifier = Modifier.size(26.dp)
-                                    )
-                                }
-
-                                // Tile 3: Battery Protection
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(tileBg)
-                                        .clickable {
-                                            runCatching { context.startActivity(resolveBatteryProtectionIntent(context)) }
-                                        }
-                                        .padding(6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_shield),
-                                        contentDescription = "Battery protection",
-                                        tint = contentTint,
-                                        modifier = Modifier.size(26.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Volume Preset Slider Card
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(28.dp))
-                                .background(containerBg)
-                                .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Preferred Volume",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = contentTint
-                                )
-                                Text(
-                                    text = "$targetPercent%",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = progressTint
-                                )
-                            }
-
-                            Slider(
-                                value = targetPercent.toFloat(),
-                                onValueChange = {
-                                    val next = it.roundToInt().coerceIn(0, 100)
-                                    targetPercent = next
-                                    setPreferredVolumeFromApp(context, next)
-                                },
-                                valueRange = 0f..100f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = progressTint,
-                                    activeTrackColor = progressTint,
-                                    inactiveTrackColor = trackTint
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
- 
+             
