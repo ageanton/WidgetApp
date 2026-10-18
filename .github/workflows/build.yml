@@ -22,7 +22,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Gradle Configs, Resources, Drawables & Layouts
+      - name: Generate Gradle Configs, Themes, Drawables & Layouts
         run: |
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
@@ -52,7 +52,7 @@ jobs:
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/xml
 
-          # Light Theme Fixed Palette
+          # System Auto Light Palette
           cat << 'EOF' > app/src/main/res/values/colors.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -60,12 +60,10 @@ jobs:
               <color name="widget_tile_bg">#E5E3DE</color>
               <color name="widget_tile_pressed">#DAD7D1</color>
               <color name="widget_content_tint">#2E2D2B</color>
-              <color name="widget_ring_track">#D6D3CC</color>
-              <color name="widget_ring_progress">#D97757</color>
           </resources>
           EOF
 
-          # Dark Theme Fixed Palette (values-night)
+          # System Auto Dark Palette (values-night)
           cat << 'EOF' > app/src/main/res/values-night/colors.xml
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -73,8 +71,6 @@ jobs:
               <color name="widget_tile_bg">#3A3936</color>
               <color name="widget_tile_pressed">#454340</color>
               <color name="widget_content_tint">#ECEAE5</color>
-              <color name="widget_ring_track">#4A4844</color>
-              <color name="widget_ring_progress">#D97757</color>
           </resources>
           EOF
 
@@ -99,32 +95,35 @@ jobs:
           </vector>
           EOF
 
-          # Container Background: 28dp radius, flat color, no border/shadow/gradient
-          cat << 'EOF' > app/src/main/res/drawable/bg_widget_container.xml
+          # Helper function to generate standard (28dp/20dp) and compact (18dp/13dp) theme shapes
+          create_theme_drawables() {
+              local name=$1
+              local c_bg=$2
+              local t_bg=$3
+              local t_press=$4
+
+              cat << EOF > app/src/main/res/drawable/bg_container_${name}.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"
-              android:shape="rectangle">
-              <solid android:color="@color/widget_container_bg" />
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="${c_bg}" />
               <corners android:radius="28dp" />
           </shape>
           EOF
 
-          # Tile Background: 20dp radius, flat color + ripple & pressed state shift
-          cat << 'EOF' > app/src/main/res/drawable/bg_tile.xml
+              cat << EOF > app/src/main/res/drawable/bg_tile_${name}.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-              android:color="@color/widget_tile_pressed">
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="${t_press}">
               <item>
                   <selector>
                       <item android:state_pressed="true">
                           <shape android:shape="rectangle">
-                              <solid android:color="@color/widget_tile_pressed" />
+                              <solid android:color="${t_press}" />
                               <corners android:radius="20dp" />
                           </shape>
                       </item>
                       <item>
                           <shape android:shape="rectangle">
-                              <solid android:color="@color/widget_tile_bg" />
+                              <solid android:color="${t_bg}" />
                               <corners android:radius="20dp" />
                           </shape>
                       </item>
@@ -132,6 +131,50 @@ jobs:
               </item>
           </ripple>
           EOF
+
+              cat << EOF > app/src/main/res/drawable/bg_container_compact_${name}.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="${c_bg}" />
+              <corners android:radius="18dp" />
+          </shape>
+          EOF
+
+              cat << EOF > app/src/main/res/drawable/bg_tile_compact_${name}.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="${t_press}">
+              <item>
+                  <selector>
+                      <item android:state_pressed="true">
+                          <shape android:shape="rectangle">
+                              <solid android:color="${t_press}" />
+                              <corners android:radius="13dp" />
+                          </shape>
+                      </item>
+                      <item>
+                          <shape android:shape="rectangle">
+                              <solid android:color="${t_bg}" />
+                              <corners android:radius="13dp" />
+                          </shape>
+                      </item>
+                  </selector>
+              </item>
+          </ripple>
+          EOF
+          }
+
+          # Theme 0: System Auto (Day/Night)
+          create_theme_drawables "auto" "@color/widget_container_bg" "@color/widget_tile_bg" "@color/widget_tile_pressed"
+          # Theme 1: Warm Stone (Light)
+          create_theme_drawables "warm" "#F1EFEA" "#E5E3DE" "#DAD7D1"
+          # Theme 2: Obsidian (Warm Dark)
+          create_theme_drawables "obsidian" "#2B2A28" "#3A3936" "#454340"
+          # Theme 3: AMOLED Pitch (Pure Deep Black)
+          create_theme_drawables "amoled" "#0D0E11" "#181A20" "#252830"
+          # Theme 4: Nordic Slate (Cool Steel)
+          create_theme_drawables "slate" "#222730" "#2E3440" "#3B4252"
+          # Theme 5: Sage Moss (Matte Olive Stone)
+          create_theme_drawables "sage" "#E4E8E1" "#D5DBD0" "#C5CEC0"
 
           # Material Symbols Rounded (FILL 1, Weight 500): volume_up
           cat << 'EOF' > app/src/main/res/drawable/ic_volume_up.xml
@@ -203,20 +246,109 @@ jobs:
           </vector>
           EOF
 
-          # 1x1 Small Widget Layout (Used by all 5 standalone 1x1 widgets)
-          cat << 'EOF' > app/src/main/res/layout/widget_small.xml
+          # 1x1 Layout Variant A: Compact (52dp floating hardware chip - DEFAULT)
+          cat << 'EOF' > app/src/main/res/layout/widget_small_compact.xml
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <FrameLayout
+                  android:id="@+id/small_container_bg"
+                  android:layout_width="52dp"
+                  android:layout_height="52dp"
+                  android:layout_gravity="center"
+                  android:background="@drawable/bg_container_compact_auto"
+                  android:padding="5dp">
+
+                  <FrameLayout
+                      android:id="@+id/tile_small_root"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:background="@drawable/bg_tile_compact_auto"
+                      android:contentDescription="Control tile">
+
+                      <ImageView
+                          android:id="@+id/img_small_center_icon"
+                          android:layout_width="21dp"
+                          android:layout_height="21dp"
+                          android:layout_gravity="center"
+                          android:src="@drawable/ic_volume_up"
+                          android:importantForAccessibility="no" />
+
+                      <ImageView
+                          android:id="@+id/img_small_vol_led"
+                          android:layout_width="8dp"
+                          android:layout_height="8dp"
+                          android:layout_gravity="top|end"
+                          android:layout_marginTop="4dp"
+                          android:layout_marginEnd="4dp"
+                          android:visibility="gone"
+                          android:importantForAccessibility="no" />
+                  </FrameLayout>
+              </FrameLayout>
+          </FrameLayout>
+          EOF
+
+          # 1x1 Layout Variant B: Micro (44dp ultra-compact chip)
+          cat << 'EOF' > app/src/main/res/layout/widget_small_micro.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <FrameLayout
+                  android:id="@+id/small_container_bg"
+                  android:layout_width="44dp"
+                  android:layout_height="44dp"
+                  android:layout_gravity="center"
+                  android:background="@drawable/bg_container_compact_auto"
+                  android:padding="4dp">
+
+                  <FrameLayout
+                      android:id="@+id/tile_small_root"
+                      android:layout_width="match_parent"
+                      android:layout_height="match_parent"
+                      android:background="@drawable/bg_tile_compact_auto"
+                      android:contentDescription="Control tile">
+
+                      <ImageView
+                          android:id="@+id/img_small_center_icon"
+                          android:layout_width="18dp"
+                          android:layout_height="18dp"
+                          android:layout_gravity="center"
+                          android:src="@drawable/ic_volume_up"
+                          android:importantForAccessibility="no" />
+
+                      <ImageView
+                          android:id="@+id/img_small_vol_led"
+                          android:layout_width="7dp"
+                          android:layout_height="7dp"
+                          android:layout_gravity="top|end"
+                          android:layout_marginTop="3dp"
+                          android:layout_marginEnd="3dp"
+                          android:visibility="gone"
+                          android:importantForAccessibility="no" />
+                  </FrameLayout>
+              </FrameLayout>
+          </FrameLayout>
+          EOF
+
+          # 1x1 Layout Variant C: Standard Full Cell
+          cat << 'EOF' > app/src/main/res/layout/widget_small_full.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/small_container_bg"
+              android:layout_width="match_parent"
               android:layout_height="match_parent"
-              android:background="@drawable/bg_widget_container"
+              android:background="@drawable/bg_container_auto"
               android:padding="8dp">
 
               <FrameLayout
                   android:id="@+id/tile_small_root"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
-                  android:background="@drawable/bg_tile"
+                  android:background="@drawable/bg_tile_auto"
                   android:padding="6dp"
                   android:contentDescription="Control tile">
 
@@ -226,19 +358,29 @@ jobs:
                       android:layout_height="26dp"
                       android:layout_gravity="center"
                       android:src="@drawable/ic_volume_up"
-                      android:tint="@color/widget_content_tint"
+                      android:importantForAccessibility="no" />
+
+                  <ImageView
+                      android:id="@+id/img_small_vol_led"
+                      android:layout_width="10dp"
+                      android:layout_height="10dp"
+                      android:layout_gravity="top|end"
+                      android:layout_marginTop="2dp"
+                      android:layout_marginEnd="2dp"
+                      android:visibility="gone"
                       android:importantForAccessibility="no" />
               </FrameLayout>
           </FrameLayout>
           EOF
 
-          # 2x3 Grid Widget Layout (5 Tiles: Row 1 = Volume + Data, Row 2 = Battery + Internet, Row 3 = Display)
+          # 2x3 Grid Widget Layout (5 Tiles + Volume LED Indicator)
           cat << 'EOF' > app/src/main/res/layout/widget_grid_2x3.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/grid_container_bg"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
-              android:background="@drawable/bg_widget_container"
+              android:background="@drawable/bg_container_auto"
               android:orientation="vertical"
               android:padding="8dp"
               android:baselineAligned="false">
@@ -258,16 +400,25 @@ jobs:
                       android:layout_height="match_parent"
                       android:layout_weight="1"
                       android:layout_marginEnd="3dp"
-                      android:background="@drawable/bg_tile"
+                      android:background="@drawable/bg_tile_auto"
                       android:padding="6dp"
                       android:contentDescription="Toggle preset volume">
 
                       <ImageView
+                          android:id="@+id/img_grid_volume"
                           android:layout_width="26dp"
                           android:layout_height="26dp"
                           android:layout_gravity="center"
                           android:src="@drawable/ic_volume_up"
-                          android:tint="@color/widget_content_tint"
+                          android:importantForAccessibility="no" />
+
+                      <ImageView
+                          android:id="@+id/img_grid_vol_led"
+                          android:layout_width="10dp"
+                          android:layout_height="10dp"
+                          android:layout_gravity="top|end"
+                          android:layout_marginTop="2dp"
+                          android:layout_marginEnd="2dp"
                           android:importantForAccessibility="no" />
                   </FrameLayout>
 
@@ -277,16 +428,16 @@ jobs:
                       android:layout_height="match_parent"
                       android:layout_weight="1"
                       android:layout_marginStart="3dp"
-                      android:background="@drawable/bg_tile"
+                      android:background="@drawable/bg_tile_auto"
                       android:padding="6dp"
                       android:contentDescription="Mobile data">
 
                       <ImageView
+                          android:id="@+id/img_grid_data"
                           android:layout_width="26dp"
                           android:layout_height="26dp"
                           android:layout_gravity="center"
                           android:src="@drawable/ic_signal_cellular_alt"
-                          android:tint="@color/widget_content_tint"
                           android:importantForAccessibility="no" />
                   </FrameLayout>
               </LinearLayout>
@@ -306,16 +457,16 @@ jobs:
                       android:layout_height="match_parent"
                       android:layout_weight="1"
                       android:layout_marginEnd="3dp"
-                      android:background="@drawable/bg_tile"
+                      android:background="@drawable/bg_tile_auto"
                       android:padding="6dp"
                       android:contentDescription="Battery protection">
 
                       <ImageView
+                          android:id="@+id/img_grid_battery"
                           android:layout_width="26dp"
                           android:layout_height="26dp"
                           android:layout_gravity="center"
                           android:src="@drawable/ic_shield"
-                          android:tint="@color/widget_content_tint"
                           android:importantForAccessibility="no" />
                   </FrameLayout>
 
@@ -325,16 +476,16 @@ jobs:
                       android:layout_height="match_parent"
                       android:layout_weight="1"
                       android:layout_marginStart="3dp"
-                      android:background="@drawable/bg_tile"
+                      android:background="@drawable/bg_tile_auto"
                       android:padding="6dp"
                       android:contentDescription="Internet">
 
                       <ImageView
+                          android:id="@+id/img_grid_internet"
                           android:layout_width="26dp"
                           android:layout_height="26dp"
                           android:layout_gravity="center"
                           android:src="@drawable/ic_language"
-                          android:tint="@color/widget_content_tint"
                           android:importantForAccessibility="no" />
                   </FrameLayout>
               </LinearLayout>
@@ -345,22 +496,22 @@ jobs:
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
                   android:layout_weight="1"
-                  android:background="@drawable/bg_tile"
+                  android:background="@drawable/bg_tile_auto"
                   android:padding="6dp"
                   android:contentDescription="Display settings">
 
                   <ImageView
+                      android:id="@+id/img_grid_display"
                       android:layout_width="26dp"
                       android:layout_height="26dp"
                       android:layout_gravity="center"
                       android:src="@drawable/ic_display"
-                      android:tint="@color/widget_content_tint"
                       android:importantForAccessibility="no" />
               </FrameLayout>
           </LinearLayout>
           EOF
 
-          # Provider XML 1: Small 1x1 Widget (Used by all 5 standalone 1x1 tiles)
+          # Provider XML 1: Small 1x1 Widget
           cat << 'EOF' > app/src/main/res/xml/widget_small_info.xml
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
@@ -371,12 +522,12 @@ jobs:
               android:targetCellWidth="1"
               android:targetCellHeight="1"
               android:updatePeriodMillis="1800000"
-              android:initialLayout="@layout/widget_small"
+              android:initialLayout="@layout/widget_small_compact"
               android:resizeMode="none"
               android:widgetCategory="home_screen" />
           EOF
 
-          # Provider XML 2: 2x3 Grid Widget (5-Tile Pad)
+          # Provider XML 2: 2x3 Grid Widget
           cat << 'EOF' > app/src/main/res/xml/widget_grid_info.xml
           <?xml version="1.0" encoding="utf-8"?>
           <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
